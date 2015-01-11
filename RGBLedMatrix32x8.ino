@@ -8,30 +8,36 @@ const short DISP_EN_N = 47;
 const short ROW_EN[8] = {43, 41, 39, 37, 35, 33, 31, 29};
 
 const short COLOR_BITS = 8;    // Number of bits in a color code.
+const short ROWS = 8;
+const short COLS = 32;
 
 // Times to wait between each write of a given color bit.
-const uint8_t COLOR_BIT_WAIT[8] = {
-    0x01,
-    0x02,
-    0x04,
-    0x08,
-    0x10,
-    0x20,
-    0x40,
-    0x80
+const uint16_t T = 0x7;
+const uint16_t COLOR_BIT_WAIT[8] = {
+    T,
+    2*T,
+    4*T,
+    6*T,
+    8*T,
+    16*T,
+    32*T,
+    64*T
 };
 
-uint8_t red[32][8] = {};
-uint8_t blue[32][8] = {};
-uint8_t green[32][8] = {};
+uint8_t red[ROWS][COLS] = {};
+uint8_t blue[ROWS][COLS] = {};
+uint8_t green[ROWS][COLS] = {};
 
 // Global data.
 unsigned long writeTimeUs = 0; // The last time data was shifted to the display.
 uint8_t row = 7;               // The row to write to.
-uint8_t lastRow = 6;           // The last row that was written to.
+uint8_t prevRow = 6;           // The last row that was written to.
 uint8_t colorBit = 7;          // The set of color bits to be written.
 uint8_t colorBitMask;
 uint8_t startCol;
+
+unsigned long timeWorking = 0;
+unsigned long timeNow = 0;
 
 
 void setup()
@@ -71,7 +77,7 @@ void setup()
         {
             uint8_t r, g, b;
             
-            CalcRGBFromHue((row+col)*20, r, g, b);
+            CalcRGBFromHue((row+col)*10, r, g, b);
             
             red[row][col] = r;
             green[row][col] = g;
@@ -83,16 +89,28 @@ void setup()
 
 void loop()
 {
-    if (IsTimeToUpdate())
+    while (IsTimeToUpdate())
     {
         // Record the starting time of the current write.
         writeTimeUs = micros();
         
         // Record the last row that was written to.
-        lastRow = row;
+        prevRow = row;
         DetermineNextWrite();
         WriteToDisplay();
+        
+        timeNow = micros();
+        
+        timeWorking = timeNow - writeTimeUs;
+        
     }
+    
+    if (colorBit == 7)
+    {
+        //Serial.read(timeWorking);
+    }
+    
+    
 }
 
 
@@ -140,11 +158,11 @@ void WriteToDisplay()
     // If we have switched rows, disable the last row and enable the new row.
     // Also, to prevent the last row's data from being displayed on the new row,
     // disable the display until the writes in this function are complete.
-    if (lastRow != row)
+    if (prevRow != row)
     {
         digitalWrite(DISP_EN_N, HIGH);
         
-        digitalWrite(ROW_EN[lastRow], LOW);
+        digitalWrite(ROW_EN[prevRow], LOW);
         digitalWrite(ROW_EN[row], HIGH);
     }
     
@@ -182,7 +200,7 @@ void WriteToDisplay()
     digitalWrite(DISP_UPDATE, LOW);
     
     // Reenable the display if we disabled it at the beginning of this function.
-    if (lastRow != row)
+    if (prevRow != row)
     {
         digitalWrite(DISP_EN_N, LOW);
     }
@@ -191,39 +209,35 @@ void WriteToDisplay()
 // Determine the byte to write to a specific register given the color
 // matrix, starting column (after which the next 7 columns will be used),
 // the row, and the color bit position.
-uint8_t GetShiftByte(uint8_t color[][8])
+uint8_t GetShiftByte(uint8_t color[][32])
 {
-    uint8_t shiftByte = 0xff;
+    uint8_t shiftByte = 0x0;
+    uint8_t endCol = startCol + 8;
     
-    /***   TEST CODE   ***/
-    // To check if we can properly address each column, write a different
-    // byte depending on the start column.
-    if (color == red)
+    // row
+    // startCol
+    // colorBitMask
+    // colorBit
+    
+    for (uint8_t col = startCol; col < endCol; col++)
     {
-        switch (startCol)
+        shiftByte = shiftByte << 1;
+        
+        if ((color[row][col] & colorBitMask) == 0)
         {
-        case 0:
-            shiftByte = 0b10000000;
-            break;
-            
-        case 8:
-            shiftByte = 0b11000000;
-            break;
-            
-        case 16:
-            shiftByte = 0b11100000;
-            break;
-            
-        case 24:
-            shiftByte = 0b11110000;
-            break;
-        default:
-            shiftByte = 0b11111111;
-            break;
+            shiftByte = shiftByte | 0x01;
         }
+        
+        /*
+        Serial.print(colorBitMask, HEX);
+        Serial.print("\t");
+        Serial.print(color[row][col], HEX);
+        Serial.print("\t");
+        Serial.print(color[row][col] & colorBitMask, HEX);
+        Serial.print("\t");
+        Serial.println(shiftByte, HEX);
+        */
     }
-    
-    /*** END TEST CODE ***/
     
     return shiftByte;
 }
